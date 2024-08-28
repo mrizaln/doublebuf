@@ -6,7 +6,17 @@
 #include <string>
 #include <thread>
 
+#define DOUBLEBUF_TEST_NO_SLEEP 1
+
+#if DOUBLEBUF_TEST_NO_SLEEP
+#    define doublebuf_sleep(arg)
+#else
+#    define doublebuf_sleep(arg) std::this_thread::sleep_for(arg)
+#endif
+
 std::atomic<bool> g_interrupt = false;
+
+using doublebuf::DoubleBufferAtomic;
 
 int main()
 {
@@ -14,7 +24,7 @@ int main()
 
     using Buffer       = std::string;
     using DoubleBuffer = DoubleBufferAtomic<Buffer, false>;    // on the stack (std::array)
-    // using DoubleBuffer = DoubleBufferAtomic<Buffer, true>;   // on the heap (std::unique_ptr<Buffer[]>)
+    // using DoubleBuffer = DoubleBufferAtomic<Buffer, true>;     // on the heap (std::unique_ptr<Buffer[]>)
 
     std::signal(SIGINT, [](int sig) {
         std::puts("Interrupt signal received. Exiting...");
@@ -23,7 +33,7 @@ int main()
         std::signal(sig, SIG_DFL);
     });
 
-    auto db = DoubleBuffer{ "start" };
+    auto db = DoubleBuffer{ "front", "back" };
 
     // clang-format off
     fmt::println("sizeof DoubleBufferAtomic<Buffer>  = {}", sizeof(DoubleBuffer));
@@ -32,6 +42,9 @@ int main()
     fmt::println("sizeof BufferUpdateStatus          = {}", sizeof(DoubleBuffer::BufferUpdateStatus));
     // clang-format on
 
+    fmt::println("front: {}", db.front());    // no synchronization on access
+    fmt::println("back : {}", db.back());     // no synchronization on access
+
     // producer thread
     std::jthread producer([&db](const std::stop_token& st) {
         int counter = 0;
@@ -39,15 +52,18 @@ int main()
 
             /* pretend to do some work */
 
-            db.updateBuffer([&counter](Buffer& buffer) {
-                std::this_thread::sleep_for(239ms);
+            // will be called if the buffer is idle (after swap)
+            auto update = db.updateBuffers([&counter](Buffer& buffer) {
                 buffer = fmt::format("{0} ==> {0:032b}", counter);
-                fmt::println("producer: [U] buffer: {}", buffer);
             });
+
+            if (update) {
+                fmt::println("producer: [U] buffer: {}", counter);
+            }
 
             ++counter;
             fmt::println("producer: counter: {}", counter);
-            std::this_thread::sleep_for(134ms);
+            doublebuf_sleep(134ms);
         }
     });
 
@@ -57,10 +73,11 @@ int main()
 
             /* pretend to do some work */
 
-            const auto& buffer = db.swapBuffers();
+            // guaranteed to be free to use after call to swapBuffers and before the next call to swapBuffers
+            auto&& [buffer, swapped] = db.swapBuffers();
 
             fmt::println("consumer: (S) buffer: {}", buffer);
-            std::this_thread::sleep_for(1078ms);
+            doublebuf_sleep(1078ms);
         }
     });
 
