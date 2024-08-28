@@ -1,2 +1,3 @@
 # doublebuf
-A simple double buffering mechanism implementation written in C++20
+
+A simple lock-less double buffering mechanism implementation written in C++20

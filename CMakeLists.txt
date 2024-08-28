@@ -4,7 +4,9 @@ project(
   doublebuf
   VERSION 0.0.0
   LANGUAGES CXX
-  DESCRIPTION "A simple double buffering mechanism implementation written in C++20")
+  DESCRIPTION
+    "A simple lock-less double buffering mechanism implementation written in C++20"
+)
 
 add_library(doublebuf INTERFACE)
 target_include_directories(doublebuf INTERFACE include)
