@@ -75,15 +75,20 @@ int main()
     });
 
     // consumer thread (this thread)
-    using Clock   = std::chrono::steady_clock;
+
+    using Clock = std::chrono::steady_clock;
+
     auto duration = 10s;
     auto start    = Clock::now();
 
-    for (auto now = Clock::now(); now < start + duration; now = Clock::now()) {
-        // guaranteed to be free to use after call to swapBuffers until the next call to swapBuffers
+    while (Clock::now() < start + duration) {
+
+        /* some work... */
+
+        // front buffer guaranteed to be free to use after this until the next call to swapBuffers
         auto&& [buffer, swapped] = buf.swapBuffers();
 
-        /* some work... (render or something) */
+        /* using the front buffer */
 
         println("consumer: (S) buffer: {}", buffer);
 
