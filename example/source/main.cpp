@@ -1,4 +1,4 @@
-#include <doublebuf/double_buffer_atomic.hpp>
+#include <doublebuf/doublebuf.hpp>
 
 #include <fmt/core.h>
 
@@ -6,7 +6,7 @@
 #include <string>
 #include <thread>
 
-#define DOUBLEBUF_TEST_NO_SLEEP 1
+// #define DOUBLEBUF_TEST_NO_SLEEP 1
 
 #if DOUBLEBUF_TEST_NO_SLEEP
 #    define doublebuf_sleep(arg)
@@ -16,15 +16,15 @@
 
 std::atomic<bool> g_interrupt = false;
 
-using doublebuf::DoubleBufferAtomic;
+using doublebuf::DoubleBuf;
 
 int main()
 {
     using namespace std::chrono_literals;
 
-    using Buffer       = std::string;
-    using DoubleBuffer = DoubleBufferAtomic<Buffer, false>;    // on the stack (std::array)
-    // using DoubleBuffer = DoubleBufferAtomic<Buffer, true>;     // on the heap (std::unique_ptr<Buffer[]>)
+    using Buffer    = std::string;
+    using DoubleBuf = DoubleBuf<Buffer, false>;    // on the stack (std::array)
+    // using DoubleBuf = DoubleBuf<Buffer, true>;     // on the heap (std::unique_ptr<Buffer[]>)
 
     std::signal(SIGINT, [](int sig) {
         std::puts("Interrupt signal received. Exiting...");
@@ -33,13 +33,13 @@ int main()
         std::signal(sig, SIG_DFL);
     });
 
-    auto db = DoubleBuffer{ "front", "back" };
+    auto db = DoubleBuf{ "front", "back" };
 
     // clang-format off
-    fmt::println("sizeof DoubleBufferAtomic<Buffer>  = {}", sizeof(DoubleBuffer));
-    fmt::println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuffer::s_dynamicAlloc, sizeof(DoubleBuffer::BuffersType));
-    fmt::println("sizeof Buffer                      = {}", sizeof(DoubleBuffer::BufferType));
-    fmt::println("sizeof BufferUpdateStatus          = {}", sizeof(DoubleBuffer::BufferUpdateStatus));
+    fmt::println("sizeof DoubleBuf<Buffer>           = {}", sizeof(DoubleBuf));
+    fmt::println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuf::is_dynamic_alloc, sizeof(DoubleBuf::UnderlyingBuf));
+    fmt::println("sizeof Buffer                      = {}", sizeof(DoubleBuf::Value));
+    fmt::println("sizeof BufferUpdateStatus          = {}", sizeof(DoubleBuf::BufUpdateStatus));
     // clang-format on
 
     fmt::println("front: {}", db.front());    // no synchronization on access
@@ -53,7 +53,7 @@ int main()
             /* pretend to do some work */
 
             // will be called if the buffer is idle (after swap)
-            auto update = db.updateBuffers([&counter](Buffer& buffer) {
+            auto update = db.update_buffers([&counter](Buffer& buffer) {
                 buffer = fmt::format("{0} ==> {0:032b}", counter);
             });
 
@@ -74,7 +74,7 @@ int main()
             /* pretend to do some work */
 
             // guaranteed to be free to use after call to swapBuffers and before the next call to swapBuffers
-            auto&& [buffer, swapped] = db.swapBuffers();
+            auto&& [buffer, swapped] = db.swap_buffers();
 
             fmt::println("consumer: (S) buffer: {}", buffer);
             doublebuf_sleep(1078ms);
