@@ -33,7 +33,7 @@ target_link_libraries(main PRIVATE doublebuf)
 #include <iostream>
 #include <thread>
 
-using doublebuf::DoubleBufferAtomic;
+using doublebuf::DoubleBuf;
 
 template <typename... Ts>
 void println(std::format_string<Ts...>&& fmt, Ts&&... ts)
@@ -46,7 +46,7 @@ int main()
 {
     using namespace std::chrono_literals;
 
-    auto buf = DoubleBufferAtomic<std::string>{ "front", "back" };
+    auto buf = DoubleBuf<std::string>{ "front", "back" };
 
     // producer thread
     std::jthread producer([&buf](const std::stop_token& st) {
@@ -59,7 +59,7 @@ int main()
             println("producer: counter: {}", counter);
 
             // will be processed if the buffer is idle (after swap)
-            auto update = buf.updateBuffers([&counter](std::string& buffer) {
+            auto update = buf.update_buffers([&counter](std::string& buffer) {
                 buffer = std::format("{0} ==> {0:032b}", counter);
                 println("producer: [U] buffer: {}", buffer);
             });
@@ -85,8 +85,13 @@ int main()
 
         /* some work... */
 
-        // front buffer guaranteed to be free to use after this until the next call to swapBuffers
-        auto&& [buffer, swapped] = buf.swapBuffers();
+        // front buffer guaranteed to be free to use after this until the next call to swap_buffers()
+        auto&& [buffer, swapped] = buf.swap_buffers();
+
+        // swap_buffers() may not swap anything and return false flag to indicate that
+        if (not swapped) {
+            // do something
+        }
 
         /* using the front buffer */
 
