@@ -17,8 +17,8 @@ namespace doublebuf
         using Value         = T;
         using UnderlyingBuf = std::conditional_t<DynamicAlloc, std::unique_ptr<T[]>, std::array<T, 2>>;
 
-        static bool constexpr is_dynamic_alloc    = DynamicAlloc;
-        static bool constexpr is_always_lock_free = std::atomic<std::uint32_t>::is_always_lock_free;
+        static constexpr bool is_dynamic_alloc    = DynamicAlloc;
+        static constexpr bool is_always_lock_free = std::atomic<std::uint32_t>::is_always_lock_free;
 
         enum class BufUpdateStatus : std::uint32_t
         {
@@ -34,7 +34,7 @@ namespace doublebuf
         };
 
         explicit DoubleBuf(Value front = {}, Value back = {})
-            requires (!DynamicAlloc)
+            requires (not DynamicAlloc)
             : m_buffers{ std::move(front), std::move(back) }
         {
         }
@@ -47,41 +47,43 @@ namespace doublebuf
 
         SwapResult swap_buffers() noexcept
         {
-            if (m_info != BufUpdateStatus::Done) {
-                return { m_buffers[m_front], false };
+            if (m_info.load(Ord::acquire) != BufUpdateStatus::Done) {
+                return { m_buffers[m_front.load(Ord::relaxed)], false };
             }
 
-            // the index swapped here
-            auto front = m_front.fetch_xor(1) ^ 1;    // emulate xor_fetch
+            // m_front is not used to synchronize the access to the buffers, so we can use relaxed order
+            auto front = m_front.fetch_xor(1, Ord::relaxed) ^ 1;    // emulate xor_fetch
 
-            m_info = BufUpdateStatus::Idle;
+            m_info.store(BufUpdateStatus::Idle, Ord::release);
 
             return { m_buffers[front], true };
         }
 
         bool update_buffers(std::invocable<Value&> auto&& update) noexcept
         {
-            if (m_info != BufUpdateStatus::Idle) {
+            if (m_info.load(Ord::acquire) != BufUpdateStatus::Idle) {
                 return false;
             }
-            m_info = BufUpdateStatus::Updating;
+            m_info.store(BufUpdateStatus::Updating, Ord::relaxed);
 
-            auto back = m_front ^ 1;    // access the back buffer
+            auto back = m_front.load(Ord::relaxed) ^ 1;    // access the back buffer
             std::forward<decltype(update)>(update)(m_buffers[back]);
 
-            m_info = BufUpdateStatus::Done;
+            m_info.store(BufUpdateStatus::Done, Ord::release);
             return true;
         }
 
-        Value&       front() noexcept { return m_buffers[m_front]; }
-        const Value& front() const noexcept { return m_buffers[m_front]; }
+        Value&       front() noexcept { return m_buffers[m_front.load(Ord::relaxed)]; }
+        const Value& front() const noexcept { return m_buffers[m_front.load(Ord::relaxed)]; }
 
-        Value&       back() noexcept { return m_buffers[m_front ^ 1]; }
-        const Value& back() const noexcept { return m_buffers[m_front ^ 1]; }
+        Value&       back() noexcept { return m_buffers[m_front.load(Ord::relaxed) ^ 1]; }
+        const Value& back() const noexcept { return m_buffers[m_front.load(Ord::relaxed) ^ 1]; }
 
-        BufUpdateStatus status() const noexcept { return m_info; }
+        BufUpdateStatus status() const noexcept { return m_info.load(Ord::relaxed); }
 
     private:
+        using Ord = std::memory_order;
+
         UnderlyingBuf                m_buffers;
         std::atomic<BufUpdateStatus> m_info  = BufUpdateStatus::Idle;
         std::atomic<std::uint32_t>   m_front = 0;
