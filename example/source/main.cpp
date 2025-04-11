@@ -6,7 +6,7 @@
 #include <string>
 #include <thread>
 
-// #define DOUBLEBUF_TEST_NO_SLEEP 1
+#define DOUBLEBUF_TEST_NO_SLEEP 1
 
 #if DOUBLEBUF_TEST_NO_SLEEP
 #    define doublebuf_sleep(arg)
@@ -37,9 +37,9 @@ int main()
 
     // clang-format off
     fmt::println("sizeof DoubleBuf<Buffer>           = {}", sizeof(DoubleBuf));
-    fmt::println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuf::is_dynamic_alloc, sizeof(DoubleBuf::UnderlyingBuf));
+    fmt::println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuf::is_dynamic_alloc, sizeof(DoubleBuf::Buf));
     fmt::println("sizeof Buffer                      = {}", sizeof(DoubleBuf::Value));
-    fmt::println("sizeof BufferUpdateStatus          = {}", sizeof(DoubleBuf::BufUpdateStatus));
+    fmt::println("sizeof BufferUpdateStatus          = {}", sizeof(doublebuf::BufStatus));
     // clang-format on
 
     fmt::println("front: {}", db.front());    // no synchronization on access
