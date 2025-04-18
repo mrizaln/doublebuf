@@ -22,6 +22,7 @@ namespace doublebuf
     {
         Idle,
         Done,
+        Swapping,    // only used in DoubleBuf
     };
 
     template <typename T>
@@ -34,7 +35,7 @@ namespace doublebuf
     /**
      * @class LazyDoubleBuf
      *
-     * @brief Deferred-update double buferring mechanism
+     * @brief Deferred-update double buferring mechanism.
      *
      * This double buffering mechanism is akin to triple buffering where the back buffer of this buffer is
      * the middle buffer of the triple buffer. The back buffer will only be updated if the swap is made
@@ -97,34 +98,35 @@ namespace doublebuf
          */
         SwapResult<Value> swap() noexcept
         {
-            if (m_info.load(Ord::acquire) != BufStatus::Done) {
+            if (m_status.load(Ord::acquire) != BufStatus::Done) {
                 return { m_buffers[m_front.load(Ord::relaxed)], false };
             }
 
             // m_front is not used to synchronize the access to the buffers, so we can use relaxed order
             auto front = m_front.fetch_xor(1, Ord::relaxed) ^ 1;    // emulate xor_fetch
 
-            m_info.store(BufStatus::Idle, Ord::release);
+            m_status.store(BufStatus::Idle, Ord::release);
 
             return { m_buffers[front], true };
         }
 
         /**
-         * @brief Update the back buffer
+         * @brief Update the back buffer.
          *
-         * @param update The update function to be called on the back buffer
-         * @return Return true if the update is done, false otherwise
+         * @param update The update function to be called on the back buffer.
+         *
+         * @return Return true if the update is done, false otherwise.
          */
         bool update(std::invocable<Value&> auto&& update) noexcept
         {
-            if (m_info.load(Ord::acquire) != BufStatus::Idle) {
+            if (m_status.load(Ord::acquire) != BufStatus::Idle) {
                 return false;
             }
 
             auto back = m_front.load(Ord::relaxed) ^ 1;    // access the back buffer
             std::forward<decltype(update)>(update)(m_buffers[back]);
 
-            m_info.store(BufStatus::Done, Ord::release);
+            m_status.store(BufStatus::Done, Ord::release);
             return true;
         }
 
@@ -152,8 +154,124 @@ namespace doublebuf
         using Ord = std::memory_order;
 
         Buf                        m_buffers;
-        std::atomic<BufStatus>     m_info  = BufStatus::Idle;
-        std::atomic<std::uint32_t> m_front = 0;
+        std::atomic<BufStatus>     m_status = BufStatus::Idle;
+        std::atomic<std::uint32_t> m_front  = 0;
+    };
+
+    /**
+     * @brief Standard double buffering mechanism.
+     */
+    template <std::movable T, bool DynamicAlloc = false>
+    class DoubleBuf
+    {
+    public:
+        using Value = T;
+        using Buf   = std::conditional_t<DynamicAlloc, std::unique_ptr<T[]>, std::array<T, 2>>;
+
+        static constexpr bool is_dynamic_alloc    = DynamicAlloc;
+        static constexpr bool is_always_lock_free = std::atomic<std::uint32_t>::is_always_lock_free;
+
+        /**
+         * @brief Construct a double buffer with default value.
+         */
+        DoubleBuf()
+            requires std::default_initializable<T>
+            : DoubleBuf{ Value{}, Value{} }
+        {
+        }
+
+        /**
+         * @brief Construt a double buffer with starting value on front and back buffer.
+         *
+         * @param front Front buffer starting value.
+         * @param back Back buffer starting value.
+         */
+        DoubleBuf(Value front, Value back)
+            requires (not DynamicAlloc)
+            : m_buffers{ std::move(front), std::move(back) }
+        {
+        }
+
+        /**
+         * @brief Construt a double buffer with starting value on front and back buffer.
+         *
+         * @param front Front buffer starting value.
+         * @param back Back buffer starting value.
+         */
+        DoubleBuf(Value front, Value back)
+            requires (DynamicAlloc)
+            : m_buffers{ new Value[2]{ std::move(front), std::move(back) } }
+        {
+        }
+
+        /**
+         * @brief Swap the front and the back buffer.
+         *
+         * @return Return the front buffer and whether the swap is actually done.
+         */
+        SwapResult<T> swap() noexcept
+        {
+            auto expect = BufStatus::Done;
+            if (not m_status.compare_exchange_strong(expect, BufStatus::Swapping)) {
+                return { m_buffers[m_front.load(Ord::relaxed)], false };
+            }
+
+            auto front = m_front.fetch_xor(1, Ord::relaxed) ^ 1;    // emulate xor_fetch
+            m_status.store(BufStatus::Idle, Ord::release);
+            m_status.notify_one();
+
+            return { m_buffers[front], true };
+        }
+
+        /**
+         * @brief Update the back buffer.
+         *
+         * @param update A function used to update the buffer.
+         * @return Always return true, signaling update is done.
+         *
+         * In order to keep the API consitent with LazyDoubleBuf, I decided to make this function to return
+         * a bool anyway even though the value is always true.
+         */
+        bool update(std::invocable<Value&> auto&& update) noexcept
+        {
+            auto expect = BufStatus::Done;
+            if (not m_status.compare_exchange_strong(expect, BufStatus::Idle)) {
+                m_status.wait(BufStatus::Swapping);
+            }
+
+            auto back = m_front.load(Ord::relaxed) ^ 1;    // access the back buffer
+            update(m_buffers[back]);
+
+            m_status.store(BufStatus::Done, Ord::release);
+            return true;
+        }
+
+        /**
+         * @brief Access the front buffer (unsafe; synchronization is up to the user)
+         */
+        Value& front() noexcept { return m_buffers[m_front.load(Ord::relaxed)]; }
+
+        /**
+         * @brief Access the front buffer (unsafe; synchronization is up to the user)
+         */
+        const Value& front() const noexcept { return m_buffers[m_front.load(Ord::relaxed)]; }
+
+        /**
+         * @brief Access the back buffer (unsafe; synchronization is up to the user)
+         */
+        Value& back() noexcept { return m_buffers[m_front.load(Ord::relaxed) ^ 1]; }
+
+        /**
+         * @brief Access the back buffer (unsafe; synchronization is up to the user)
+         */
+        const Value& back() const noexcept { return m_buffers[m_front.load(Ord::relaxed) ^ 1]; }
+
+    private:
+        using Ord = std::memory_order;
+
+        Buf                        m_buffers;
+        std::atomic<BufStatus>     m_status = BufStatus::Idle;
+        std::atomic<std::uint32_t> m_front  = 0;
     };
 }
 

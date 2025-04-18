@@ -16,14 +16,12 @@
 
 std::atomic<bool> g_interrupt = false;
 
-using doublebuf::LazyDoubleBuf;
-
 int main()
 {
     using namespace std::chrono_literals;
 
     using Buffer    = std::string;
-    using DoubleBuf = LazyDoubleBuf<Buffer, false>;    // on the stack (std::array)
+    using DoubleBuf = doublebuf::LazyDoubleBuf<Buffer, false>;    // on the stack (std::array)
     // using DoubleBuf = DoubleBuf<Buffer, true>;     // on the heap (std::unique_ptr<Buffer[]>)
 
     std::signal(SIGINT, [](int sig) {
@@ -76,7 +74,7 @@ int main()
             // guaranteed to be free to use after call to swapBuffers and before the next call to swapBuffers
             auto&& [buffer, swapped] = db.swap();
 
-            fmt::println("consumer: (S) buffer: {}", buffer);
+            fmt::println("consumer: (S: {:<5}) buffer: {}", swapped, buffer);
             doublebuf_sleep(1078ms);
         }
     });
