@@ -18,13 +18,6 @@ namespace doublebuf
     static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
 #endif
 
-    enum class BufStatus : std::uint32_t
-    {
-        Idle,
-        Done,
-        Swapping,    // only used in DoubleBuf
-    };
-
     template <typename T>
     struct [[nodiscard]] SwapResult
     {
@@ -98,14 +91,13 @@ namespace doublebuf
          */
         SwapResult<Value> swap() noexcept
         {
-            if (m_status.load(Ord::acquire) != BufStatus::Done) {
+            if (not m_ready.load(Ord::acquire)) {
                 return { m_buffers[m_front.load(Ord::relaxed)], false };
             }
 
             // m_front is not used to synchronize the access to the buffers, so we can use relaxed order
             auto front = m_front.fetch_xor(1, Ord::relaxed) ^ 1;    // emulate xor_fetch
-
-            m_status.store(BufStatus::Idle, Ord::release);
+            m_ready.store(false, Ord::release);
 
             return { m_buffers[front], true };
         }
@@ -119,14 +111,14 @@ namespace doublebuf
          */
         bool update(std::invocable<Value&> auto&& update) noexcept
         {
-            if (m_status.load(Ord::acquire) != BufStatus::Idle) {
+            if (m_ready.load(Ord::acquire)) {
                 return false;
             }
 
             auto back = m_front.load(Ord::relaxed) ^ 1;    // access the back buffer
             std::forward<decltype(update)>(update)(m_buffers[back]);
+            m_ready.store(true);
 
-            m_status.store(BufStatus::Done, Ord::release);
             return true;
         }
 
@@ -154,8 +146,8 @@ namespace doublebuf
         using Ord = std::memory_order;
 
         Buf                        m_buffers;
-        std::atomic<BufStatus>     m_status = BufStatus::Idle;
-        std::atomic<std::uint32_t> m_front  = 0;
+        std::atomic<std::uint32_t> m_front = 0;
+        std::atomic<bool>          m_ready = false;
     };
 
     /**
@@ -269,9 +261,16 @@ namespace doublebuf
     private:
         using Ord = std::memory_order;
 
+        enum class BufStatus : std::uint32_t
+        {
+            Idle,
+            Done,
+            Swapping,
+        };
+
         Buf                        m_buffers;
-        std::atomic<BufStatus>     m_status = BufStatus::Idle;
         std::atomic<std::uint32_t> m_front  = 0;
+        std::atomic<BufStatus>     m_status = BufStatus::Idle;
     };
 }
 
