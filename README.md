@@ -2,6 +2,38 @@
 
 A simple lock-free double buffering mechanism implementation written in C++20
 
+## Features
+
+This library provides two double buffering mechanism,
+
+- `DoubleBuf`
+
+  Standard double buffering mechanism.
+
+- `LazyDoubleBuf`
+
+  Lazily updated double buffering mechanism. This buffering is akin to triple buffering where there will be fewer updates done into the back buffer: the update to the back buffer is only done if the data is swapped by the consumer. The difference with triple buffering then is the number of buffer used, with this one, there is only two buffers.
+
+  You can think of this buffering method as triple buffering with its back buffer can be said as the middle buffer of a traditional triple buffering mechanism. Your data that is used to update the back buffer of `LazyDoubleBuf` then is the back buffer of a traditional triple buffering mechanism.
+
+  The recency of this buffer is then as bad as a triple buffering and affected by the rate of the consumer swapping the buffer.
+
+  ```
+                                    ╭─────────────────────────────────────────╮
+                                    │              LazyDoubleBuf              │
+                                    ├─────────────────────────────────────────┤
+  ┏━━━━━━━━━━━┓    `update(fn)`     │  ┌─────────────┐       ┌──────────────┐ │
+  ┃ Producer  ┃───────────────────────▶│ back_buffer │◀─────▶│ front_buffer │ │
+  ┗━━━━━━━━━━━┛ │ only called if  │ │  └─────────────┘   ▲   └──────────────┘ │
+                │swap has happened│ ╰────────────────────│────────────────────╯
+                                                         │
+                                                `swap()` │ │swap might not happen│
+                                                         │ │if data is not ready │
+                                                         │
+                                                    ┏━━━━━━━━━━┓
+                                                    ┃ Consumer ┃
+                                                    ┗━━━━━━━━━━┛
+  ```
 ## Usage
 
 > `CMakeLists.txt`
@@ -14,7 +46,7 @@ include(FetchContent)
 FetchContent_Declare(
   doublebuf
   GIT_REPOSITORY https://github.com/mrizaln/doublebuf
-  GIT_TAG main)
+  GIT_TAG v0.2.0)
 FetchContent_MakeAvailable(doublebuf)
 
 add_executable(main main.cpp)
@@ -33,7 +65,7 @@ target_link_libraries(main PRIVATE doublebuf)
 #include <iostream>
 #include <thread>
 
-using doublebuf::DoubleBuf;
+using doublebuf::LazyDoubleBuf;
 
 template <typename... Ts>
 void println(std::format_string<Ts...>&& fmt, Ts&&... ts)
@@ -46,7 +78,7 @@ int main()
 {
     using namespace std::chrono_literals;
 
-    auto buf = DoubleBuf<std::string>{ "front", "back" };
+    auto buf = LazyDoubleBuf<std::string>{ "front", "back" };
 
     // producer thread
     std::jthread producer([&buf](const std::stop_token& st) {
@@ -58,7 +90,7 @@ int main()
             ++counter;
             println("producer: counter: {}", counter);
 
-            // will be processed if the buffer is idle (after swap)
+            // will be called called only if the buffer is idle (after swap)
             auto update = buf.update_buffers([&counter](std::string& buffer) {
                 buffer = std::format("{0} ==> {0:032b}", counter);
                 println("producer: [U] buffer: {}", buffer);

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.12)
 
 project(
   doublebuf
-  VERSION 0.0.0
+  VERSION 0.2.0
   LANGUAGES CXX
   DESCRIPTION
     "A simple lock-less double buffering mechanism implementation written in C++20"
