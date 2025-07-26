@@ -12,7 +12,7 @@ This library provides two double buffering mechanism,
 
 - `LazyDoubleBuf`
 
-  Lazily updated double buffering mechanism. This buffering is akin to triple buffering where there will be fewer updates done into the back buffer: the update to the back buffer is only done if the data is swapped by the consumer. The difference with triple buffering then is the number of buffer used, with this one, there is only two buffers.
+  Lazily-updated double buffering mechanism. This buffering is akin to triple buffering where there will be fewer updates done into the back buffer: the update to the back buffer is only done if the data is swapped by the consumer. The difference with triple buffering then is the number of buffer used, with this one, there is only two buffers.
 
   You can think of this buffering method as triple buffering with its back buffer can be said as the middle buffer of a traditional triple buffering mechanism. Your data that is used to update the back buffer of `LazyDoubleBuf` then is the back buffer of a traditional triple buffering mechanism.
 
@@ -23,8 +23,8 @@ This library provides two double buffering mechanism,
                                     │              LazyDoubleBuf              │
                                     ├─────────────────────────────────────────┤
   ┏━━━━━━━━━━━┓    `update(fn)`     │  ┌─────────────┐       ┌──────────────┐ │
-  ┃ Producer  ┃───────────────────────▶│ back_buffer │◀─────▶│ front_buffer │ │
-  ┗━━━━━━━━━━━┛ │ only called if  │ │  └─────────────┘   ▲   └──────────────┘ │
+  ┃ Producer  ┃───────────────────────>│ back_buffer │<─────>│ front_buffer │ │
+  ┗━━━━━━━━━━━┛ │ only called if  │ │  └─────────────┘   ^   └──────────────┘ │
                 │swap has happened│ ╰────────────────────│────────────────────╯
                                                          │
                                                 `swap()` │ │swap might not happen│
@@ -58,7 +58,7 @@ target_link_libraries(main PRIVATE doublebuf)
 > main.cpp
 
 ```cpp
-#include <doublebuf/double_buffer_atomic.hpp>
+#include <doublebuf/doublebuf.hpp>
 
 #include <chrono>
 #include <format>
@@ -81,8 +81,8 @@ int main()
     auto buf = LazyDoubleBuf<std::string>{ "front", "back" };
 
     // producer thread
-    std::jthread producer([&buf](const std::stop_token& st) {
-        int counter = 0;
+    auto producer = std::jthread{ [&buf](const std::stop_token& st) {
+        auto counter = 0;
         while (!st.stop_requested()) {
 
             /* some work... */
@@ -91,7 +91,7 @@ int main()
             println("producer: counter: {}", counter);
 
             // will be called called only if the buffer is idle (after swap)
-            auto update = buf.update_buffers([&counter](std::string& buffer) {
+            auto update = buf.update([&counter](std::string& buffer) {
                 buffer = std::format("{0} ==> {0:032b}", counter);
                 println("producer: [U] buffer: {}", buffer);
             });
@@ -104,7 +104,7 @@ int main()
 
             std::this_thread::sleep_for(87ms);
         }
-    });
+    } };
 
     // consumer thread (this thread)
 
@@ -117,10 +117,10 @@ int main()
 
         /* some work... */
 
-        // front buffer guaranteed to be free to use after this until the next call to swap_buffers()
-        auto&& [buffer, swapped] = buf.swap_buffers();
+        // front buffer guaranteed to be free to use after this until the next call to swap()
+        auto&& [buffer, swapped] = buf.swap();
 
-        // swap_buffers() may not swap anything and return false flag to indicate that
+        // swap() may not swap anything and return false flag to indicate that
         if (not swapped) {
             // do something
         }
