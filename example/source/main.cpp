@@ -1,8 +1,7 @@
 #include <doublebuf/doublebuf.hpp>
 
-#include <fmt/core.h>
-
 #include <csignal>
+#include <format>
 #include <string>
 #include <thread>
 
@@ -15,6 +14,13 @@
 #endif
 
 std::atomic<bool> g_interrupt = false;
+
+// No println in C++20 yet
+template <typename... Args>
+void println(std::format_string<Args...> fmt, Args&&... args)
+{
+    std::puts(std::format(fmt, std::forward<Args>(args)...).c_str());
+}
 
 int main()
 {
@@ -34,38 +40,38 @@ int main()
     auto db = DoubleBuf{ "front", "back" };
 
     // clang-format off
-    fmt::println("sizeof DoubleBuf<Buffer>           = {}", sizeof(DoubleBuf));
-    fmt::println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuf::is_dynamic_alloc, sizeof(DoubleBuf::Buf));
-    fmt::println("sizeof Buffer                      = {}", sizeof(DoubleBuf::Value));
+    println("sizeof DoubleBuf<Buffer>           = {}", sizeof(DoubleBuf));
+    println("sizeof Buffer [array] (dyn: {:<5}) = {}", DoubleBuf::is_dynamic_alloc, sizeof(DoubleBuf::Buf));
+    println("sizeof Buffer                      = {}", sizeof(DoubleBuf::Value));
     // clang-format on
 
-    fmt::println("front: {}", db.front());    // no synchronization on access
-    fmt::println("back : {}", db.back());     // no synchronization on access
+    println("front: {}", db.front());    // no synchronization on access
+    println("back : {}", db.back());     // no synchronization on access
 
     // producer thread
-    std::jthread producer([&db](const std::stop_token& st) {
-        int counter = 0;
+    auto producer = std::jthread{ [&db](const std::stop_token& st) {
+        int counter  = 0;
         while (!st.stop_requested()) {
 
             /* pretend to do some work */
 
             // will be called if the buffer is idle (after swap)
             auto update = db.update([&counter](Buffer& buffer) {
-                buffer = fmt::format("{0} ==> {0:032b}", counter);
+                buffer = std::format("{0} ==> {0:032b}", counter);
             });
 
             if (update) {
-                fmt::println("producer: [U] buffer: {}", counter);
+                println("producer: [U] buffer: {}", counter);
             }
 
             ++counter;
-            fmt::println("producer: counter: {}", counter);
+            println("producer: counter: {}", counter);
             doublebuf_sleep(134ms);
         }
-    });
+    } };
 
     // consumer thread
-    std::jthread consumer([&db](const std::stop_token& st) {
+    auto consumer = std::jthread{ [&db](const std::stop_token& st) {
         while (!st.stop_requested()) {
 
             /* pretend to do some work */
@@ -73,23 +79,23 @@ int main()
             // guaranteed to be free to use after call to swapBuffers and before the next call to swapBuffers
             auto&& [buffer, swapped] = db.swap();
 
-            fmt::println("consumer: (S: {:<5}) buffer: {}", swapped, buffer);
+            println("consumer: (S: {:<5}) buffer: {}", swapped, buffer);
             doublebuf_sleep(1078ms);
         }
-    });
+    } };
 
     // // second consumer thread (unsynchronized access to the buffer): DON'T DO THIS
-    // std::jthread t3([&db](const std::stop_token& st) {
+    // auto t3 = std::jthread{ [&db](const std::stop_token& st) {
     //     while (!st.stop_requested()) {
     //         /* pretend to do some work */
 
-    //         const auto& buffer = db.getFront();
+    //         const auto& buffer = db.front();
 
     //         // unsynchronized access: the buffer might be swapped while read
-    //         fmt::println("t3: (F) buffer: {}", buffer);
+    //         println("t3: (F) buffer: {}", buffer);
     //         std::this_thread::sleep_for(108ms);
     //     }
-    // });
+    // } };
 
     // multiple consumer might be possible with sub-consumer like following:
     // - consumer: swaps the buffer
